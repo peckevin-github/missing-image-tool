@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B2C Commerce Missing Image Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Public Sans', sans-serif;
+        }
+        .loader {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2">B2C Commerce Missing Image Analyzer</h1>
+            <p class="text-gray-600">Desktop Edition - No file size limits!</p>
+        </div>
+
+        <!-- Main Form -->
+        <div class="bg-white p-6 md:p-8 rounded-2xl shadow-lg space-y-8">
+            
+            <!-- Instructions Section -->
+            <div>
+                <details class="bg-gray-50 p-4 rounded-lg border">
+                    <summary class="font-semibold cursor-pointer text-lg text-gray-800">Click here for instructions</summary>
+                    <div class="mt-4 space-y-4 text-gray-700 border-t pt-4">
+                        <div>
+                            <h3 class="text-md font-semibold mb-2">How It Works</h3>
+                            <p class="text-sm">
+                                This tool identifies two types of image issues for products assigned to categories in your storefront catalog:
+                                <ol class="list-decimal list-inside pl-4 mt-2 text-xs">
+                                    <li><strong>Missing Image Group:</strong> Products that do not have an <strong>&lt;image-group&gt;</strong> with a `view-type` matching the View Type you provide.</li>
+                                    <li><strong>Missing Image File:</strong> Products that have the correct image group, but the image file specified in the <strong>&lt;image path="..."/&gt;</strong> tag is not found on the WebDAV server.</li>
+                                </ol>
+                                It recursively scans your entire WebDAV folder to find all available image files for the comparison.
+                            </p>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-200 rounded p-3 mt-3">
+                            <p class="text-sm font-semibold text-blue-800">✨ Desktop Edition Benefits:</p>
+                            <ul class="text-xs text-blue-700 mt-2 space-y-1">
+                                <li>• No file size limits - handles catalogs of any size</li>
+                                <li>• Streaming XML parser - efficient memory usage</li>
+                                <li>• Native file dialogs for better file selection</li>
+                            </ul>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Step 1: File Selection -->
+            <div>
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b">1. Select Catalog Files</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Master Catalog</label>
+                        <button id="select-master-btn" class="w-full py-2 px-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-sm">
+                            Click to select file
+                        </button>
+                        <p id="master-file-name" class="text-xs text-gray-500 mt-2 italic">No file selected</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Storefront Catalog</label>
+                        <button id="select-storefront-btn" class="w-full py-2 px-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-sm">
+                            Click to select file
+                        </button>
+                        <p id="storefront-file-name" class="text-xs text-gray-500 mt-2 italic">No file selected</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: WebDAV Inputs -->
+            <div>
+                <h2 class="text-xl font-semibold mb-4 pb-2 border-b">2. Configure Instance & Paths</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="view-type" class="block text-sm font-medium text-gray-700">View Type</label>
+                        <input type="text" id="view-type" placeholder="e.g., CI, large, small, swatch" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="webdav-url" class="block text-sm font-medium text-gray-700">WebDAV Folder URL</label>
+                        <input type="text" id="webdav-url" placeholder="https://your-realm.demandware.net/.../images/" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+                        <input type="text" id="username" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                        <input type="password" id="password" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Action Button -->
+            <div>
+                <button id="analyze-button" class="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 transition-transform transform hover:scale-105">
+                    <span id="button-text">Analyze Imagery</span>
+                    <div id="button-loader" class="loader ml-2 hidden"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Status & Results -->
+        <div id="status-container" class="mt-8 bg-white p-6 md:p-8 rounded-2xl shadow-lg hidden">
+            <h2 class="text-xl font-semibold mb-4">Analysis Log</h2>
+            <pre id="log-output" class="bg-gray-900 text-white text-sm rounded-md p-4 h-64 overflow-y-auto whitespace-pre-wrap"></pre>
+            <div id="results-container" class="mt-6 text-center hidden">
+                <h3 id="results-summary" class="text-lg font-semibold my-2 text-gray-800"></h3>
+                <button id="download-csv-button" class="inline-block py-2 px-6 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-transform transform hover:scale-105">Download Missing Images CSV</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Store selected file paths
+        let masterCatalogPath = null;
+        let storefrontCatalogPath = null;
+        let finalMissingProducts = [];
+        let currentViewType = '';
+
+        // DOM element references
+        const selectMasterBtn = document.getElementById('select-master-btn');
+        const selectStorefrontBtn = document.getElementById('select-storefront-btn');
+        const masterFileName = document.getElementById('master-file-name');
+        const storefrontFileName = document.getElementById('storefront-file-name');
+        const viewTypeInput = document.getElementById('view-type');
+        const webdavUrlInput = document.getElementById('webdav-url');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const analyzeButton = document.getElementById('analyze-button');
+        const buttonText = document.getElementById('button-text');
+        const buttonLoader = document.getElementById('button-loader');
+        const statusContainer = document.getElementById('status-container');
+        const logOutput = document.getElementById('log-output');
+        const resultsContainer = document.getElementById('results-container');
+        const resultsSummary = document.getElementById('results-summary');
+        const downloadCsvButton = document.getElementById('download-csv-button');
+
+        // Logger function
+        function log(message) {
+            console.log(message);
+            logOutput.textContent += message + '\n';
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        // File selection handlers
+        selectMasterBtn.addEventListener('click', async () => {
+            const filePath = await window.electronAPI.selectFile('Select Master Catalog XML');
+            if (filePath) {
+                masterCatalogPath = filePath;
+                masterFileName.textContent = filePath.split(/[\\/]/).pop();
+                masterFileName.classList.remove('italic', 'text-gray-500');
+                masterFileName.classList.add('text-blue-600', 'font-medium');
+            }
+        });
+
+        selectStorefrontBtn.addEventListener('click', async () => {
+            const filePath = await window.electronAPI.selectFile('Select Storefront Catalog XML');
+            if (filePath) {
+                storefrontCatalogPath = filePath;
+                storefrontFileName.textContent = filePath.split(/[\\/]/).pop();
+                storefrontFileName.classList.remove('italic', 'text-gray-500');
+                storefrontFileName.classList.add('text-blue-600', 'font-medium');
+            }
+        });
+
+        // Listen for progress updates
+        window.electronAPI.onAnalysisProgress((data) => {
+            if (data.type === 'log') {
+                log(data.message);
+            }
+        });
+
+        // Main analysis function
+        async function analyze() {
+            // Validation
+            analyzeButton.disabled = true;
+            buttonText.textContent = "Analyzing...";
+            buttonLoader.classList.remove('hidden');
+            statusContainer.classList.remove('hidden');
+            resultsContainer.classList.add('hidden');
+            logOutput.textContent = '';
+            finalMissingProducts = [];
+
+            const viewType = viewTypeInput.value.trim();
+            const webdavUrl = webdavUrlInput.value.trim();
+
+            if (!masterCatalogPath || !storefrontCatalogPath || !webdavUrl || !usernameInput.value || !viewType) {
+                log('Error: Please select both catalog files and fill in all fields.');
+                resetUI();
+                return;
+            }
+            
+            if (!webdavUrl.endsWith('/')) {
+                log('Error: "WebDAV Folder URL" must end with a forward slash (/).');
+                resetUI();
+                return;
+            }
+
+            log('Starting analysis...');
+            log('');
+
+            // Call Electron main process to do the analysis
+            const result = await window.electronAPI.analyze({
+                masterCatalogPath,
+                storefrontCatalogPath,
+                viewType,
+                webdavUrl,
+                username: usernameInput.value,
+                password: passwordInput.value
+            });
+
+            if (result.success) {
+                finalMissingProducts = result.missingProducts;
+                currentViewType = viewType; // Store for CSV filename
+                
+                resultsSummary.textContent = `Found ${result.summary.total} total issues: ${result.summary.missingGroups} missing image groups, ${result.summary.emptyGroups} empty groups, ${result.summary.missingFiles} missing files.`;
+                resultsContainer.classList.remove('hidden');
+            } else {
+                log('');
+                log('Analysis failed. See error message above.');
+            }
+
+            resetUI(true);
+        }
+
+        function resetUI(isFinished = false) {
+            analyzeButton.disabled = false;
+            buttonText.textContent = isFinished ? "Run New Analysis" : "Analyze Imagery";
+            buttonLoader.classList.add('hidden');
+        }
+
+        // CSV download handler
+        async function downloadCSV() {
+            if (finalMissingProducts.length === 0) {
+                alert("No missing images to export.");
+                return;
+            }
+            
+            const headers = ["product_id", "reason", "missing_image_path"];
+            let csvContent = headers.join(",") + "\n";
+
+            finalMissingProducts.forEach(item => {
+                const row = [
+                    `"${item.productId}"`,
+                    `"${item.reason}"`,
+                    `"${item.imagePath}"`
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+
+            const result = await window.electronAPI.saveCsv(csvContent, currentViewType);
+            
+            if (result.success) {
+                log('');
+                log(`CSV saved successfully to: ${result.path}`);
+            }
+        }
+
+        // Event listeners
+        analyzeButton.addEventListener('click', analyze);
+        downloadCsvButton.addEventListener('click', downloadCSV);
+
+        // Page load message
+        console.log('✓ Missing Image Tool loaded successfully!');
+        console.log('Desktop Edition - No file size limits!');
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# DMG installers in root
+*.dmg
+
+# Electron
+out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files (your catalog XMLs)
+*-catalog*.xml
+
+# App launchers
+*.app
+
+# Keep icon files
+!build/icon.png
+!build/icon.icns
+
