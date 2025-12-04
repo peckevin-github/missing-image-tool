@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+Install/
 
 # DMG installers in root
 *.dmg

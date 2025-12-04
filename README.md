@@ -22,12 +22,14 @@ The tool identifies two types of image issues:
 
 ### Quick Install (Recommended)
 
-**Pre-built installers are available in the `Install/` folder:**
+**Download pre-built installers from [GitHub Releases](https://github.com/YOUR-USERNAME/missing-image-tool/releases):**
 
 - **macOS**: `Missing Image Tool-1.0.0.dmg`
 - **Windows**: `Missing Image Tool Setup 1.0.0.exe`
 
-Just double-click the appropriate installer for your platform and follow the prompts. See `Install/README.md` for detailed installation instructions.
+Just download the appropriate installer for your platform and double-click to install.
+
+> **Note:** Installers are not included in the repository due to GitHub's file size limits. Download them from the Releases page instead.
 
 ### Development Setup
 
