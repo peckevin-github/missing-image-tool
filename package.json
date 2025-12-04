@@ -1,6 +1,6 @@
 {
   "name": "missing-image-tool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "B2C Commerce Missing Image Analyzer - Desktop App",
   "main": "main.js",
   "scripts": {
