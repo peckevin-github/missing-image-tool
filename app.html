@@ -45,12 +45,12 @@
                         <div>
                             <h3 class="text-md font-semibold mb-2">How It Works</h3>
                             <p class="text-sm">
-                                This tool identifies two types of image issues for products assigned to categories in your storefront catalog:
+                                This tool analyzes <strong>online products</strong> (where online-flag="true") that are assigned to categories in your storefront catalog. It identifies two types of image issues:
                                 <ol class="list-decimal list-inside pl-4 mt-2 text-xs">
                                     <li><strong>Missing Image Group:</strong> Products that do not have an <strong>&lt;image-group&gt;</strong> with a `view-type` matching the View Type you provide.</li>
                                     <li><strong>Missing Image File:</strong> Products that have the correct image group, but the image file specified in the <strong>&lt;image path="..."/&gt;</strong> tag is not found on the WebDAV server.</li>
                                 </ol>
-                                It recursively scans your entire WebDAV folder to find all available image files for the comparison.
+                                Offline products are automatically ignored. The tool recursively scans your entire WebDAV folder to find all available image files for the comparison.
                             </p>
                         </div>
                         <div class="bg-blue-50 border border-blue-200 rounded p-3 mt-3">
@@ -91,8 +91,9 @@
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b">2. Configure Instance & Paths</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label for="view-type" class="block text-sm font-medium text-gray-700">View Type</label>
-                        <input type="text" id="view-type" placeholder="e.g., CI, large, small, swatch" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <label for="view-type" class="block text-sm font-medium text-gray-700">View Type <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="view-type" placeholder="e.g., CI, large, small, swatch (leave empty for all types)" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">Leave empty to check all image view types, or specify one to check only that type.</p>
                     </div>
                     <div class="md:col-span-2">
                         <label for="webdav-url" class="block text-sm font-medium text-gray-700">WebDAV Folder URL</label>
@@ -203,8 +204,8 @@
             const viewType = viewTypeInput.value.trim();
             const webdavUrl = webdavUrlInput.value.trim();
 
-            if (!masterCatalogPath || !storefrontCatalogPath || !webdavUrl || !usernameInput.value || !viewType) {
-                log('Error: Please select both catalog files and fill in all fields.');
+            if (!masterCatalogPath || !storefrontCatalogPath || !webdavUrl || !usernameInput.value) {
+                log('Error: Please select both catalog files and fill in WebDAV URL and username.');
                 resetUI();
                 return;
             }

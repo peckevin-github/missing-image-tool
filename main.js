@@ -80,6 +80,8 @@ async function parseXMLCatalog(filePath, sendProgress) {
         const products = new Map();
         const variantMap = new Map();
         let productCount = 0;
+        let onlineProductCount = 0;
+        let offlineProductCount = 0;
         
         // Current product being parsed
         let currentProduct = null;
@@ -99,6 +101,7 @@ async function parseXMLCatalog(filePath, sendProgress) {
             if (node.name === 'product' && currentPath.length === 2) {
                 currentProduct = {
                     productId: node.attributes['product-id'],
+                    onlineFlag: node.attributes['online-flag'],
                     images: null,
                     variations: null,
                     imageGroups: [],
@@ -142,22 +145,32 @@ async function parseXMLCatalog(filePath, sendProgress) {
                 }
                 
                 if (currentProduct.productId) {
-                    // Convert imageGroups array to structured format
-                    if (currentProduct.imageGroups && currentProduct.imageGroups.length > 0) {
-                        currentProduct.images = { 'image-group': currentProduct.imageGroups };
-                    }
-                    delete currentProduct.imageGroups;
+                    // Check if product is online (online-flag="true")
+                    const isOnline = currentProduct.onlineFlag === 'true';
                     
-                    // Map variants
-                    if (currentProduct.variants && currentProduct.variants.length > 0) {
-                        currentProduct.variants.forEach(variantId => {
-                            variantMap.set(variantId, currentProduct.productId);
-                        });
-                        currentProduct.variations = { hasVariants: true };
+                    if (isOnline) {
+                        onlineProductCount++;
+                        
+                        // Convert imageGroups array to structured format
+                        if (currentProduct.imageGroups && currentProduct.imageGroups.length > 0) {
+                            currentProduct.images = { 'image-group': currentProduct.imageGroups };
+                        }
+                        delete currentProduct.imageGroups;
+                        
+                        // Map variants (only for online products)
+                        if (currentProduct.variants && currentProduct.variants.length > 0) {
+                            currentProduct.variants.forEach(variantId => {
+                                variantMap.set(variantId, currentProduct.productId);
+                            });
+                            currentProduct.variations = { hasVariants: true };
+                        }
+                        delete currentProduct.variants;
+                        delete currentProduct.onlineFlag;
+                        
+                        products.set(currentProduct.productId, currentProduct);
+                    } else {
+                        offlineProductCount++;
                     }
-                    delete currentProduct.variants;
-                    
-                    products.set(currentProduct.productId, currentProduct);
                 }
                 
                 currentProduct = null;
@@ -168,8 +181,8 @@ async function parseXMLCatalog(filePath, sendProgress) {
         });
         
             saxStream.on('end', () => {
-                sendProgress({ type: 'parsing', message: `Parsed ${productCount} products` });
-                resolve({ products, variantMap, productCount });
+                sendProgress({ type: 'parsing', message: `Parsed ${productCount} products (${onlineProductCount} online, ${offlineProductCount} offline)` });
+                resolve({ products, variantMap, productCount, onlineProductCount, offlineProductCount });
             });
             
             saxStream.on('error', (error) => {
@@ -335,8 +348,10 @@ ipcMain.handle('analyze', async (event, options) => {
         
         // 1. Parse master catalog
         sendProgress({ type: 'log', message: 'Parsing master catalog...' });
-        const { products, variantMap, productCount } = await parseXMLCatalog(masterCatalogPath, sendProgress);
+        const { products, variantMap, productCount, onlineProductCount, offlineProductCount } = await parseXMLCatalog(masterCatalogPath, sendProgress);
         sendProgress({ type: 'log', message: `✓ Parsed ${productCount} products from master catalog` });
+        sendProgress({ type: 'log', message: `  └─ ${onlineProductCount} online products (analyzed)` });
+        sendProgress({ type: 'log', message: `  └─ ${offlineProductCount} offline products (ignored)` });
         sendProgress({ type: 'log', message: `✓ Mapped ${variantMap.size} variants to master products` });
         
         // 2. Parse storefront catalog
@@ -345,12 +360,14 @@ ipcMain.handle('analyze', async (event, options) => {
         sendProgress({ type: 'log', message: `✓ Found ${categoryAssignments.size} category assignments` });
         
         // 3. Analyze products for missing images
-        sendProgress({ type: 'log', message: `Analyzing products for missing image groups (view-type='${viewType}')...` });
+        const viewTypeMessage = viewType ? `view-type='${viewType}'` : 'all view types';
+        sendProgress({ type: 'log', message: `Analyzing products for missing image groups (${viewTypeMessage})...` });
         
         const missingProducts = [];
         const pathsToCheck = new Map();
         let variantsMappedCount = 0;
         let productsNotFoundCount = 0;
+        const checkAllViewTypes = !viewType || viewType.trim() === '';
         
         for (const categorizedProductId of categoryAssignments) {
             let productToAnalyzeId = categorizedProductId;
@@ -368,7 +385,7 @@ ipcMain.handle('analyze', async (event, options) => {
                 continue;
             }
             
-            // Check for image group
+            // Check for image group(s)
             let hasImageGroup = false;
             let imagePaths = [];
             
@@ -381,42 +398,61 @@ ipcMain.handle('analyze', async (event, options) => {
                     // Handle both old format (from XML parser) and new format (from SAX streaming)
                     const groupViewType = group['@_view-type'] || group.viewType;
                     
-                    if (groupViewType === viewType) {
+                    // If checking all view types OR this group matches the specified view type
+                    if (checkAllViewTypes || groupViewType === viewType) {
                         hasImageGroup = true;
                         
                         // Handle old format (img.path) and new format (group.images array)
                         if (group.images && Array.isArray(group.images)) {
-                            imagePaths.push(...group.images);
+                            group.images.forEach(imgPath => {
+                                imagePaths.push({ path: imgPath, viewType: groupViewType });
+                            });
                         } else if (group.image) {
                             const images = Array.isArray(group.image) ? group.image : [group.image];
                             images.forEach(img => {
                                 if (img['@_path']) {
-                                    imagePaths.push(img['@_path']);
+                                    imagePaths.push({ path: img['@_path'], viewType: groupViewType });
                                 }
                             });
                         }
-                        break;
+                        
+                        // If checking specific view type, break after finding it
+                        if (!checkAllViewTypes) {
+                            break;
+                        }
                     }
                 }
             }
             
             if (!hasImageGroup) {
+                const reason = checkAllViewTypes 
+                    ? 'Missing image groups (no image groups found)'
+                    : `Missing image group for view-type '${viewType}'`;
                 missingProducts.push({
                     productId: categorizedProductId,
-                    reason: `Missing image group for view-type '${viewType}'`,
-                    imagePath: ''
+                    reason: reason,
+                    imagePath: '',
+                    viewType: viewType || 'all'
                 });
             } else if (imagePaths.length === 0) {
+                const reason = checkAllViewTypes 
+                    ? 'Image groups exist but are empty'
+                    : `Image group for view-type '${viewType}' exists but is empty`;
                 missingProducts.push({
                     productId: categorizedProductId,
-                    reason: `Image group for view-type '${viewType}' exists but is empty`,
-                    imagePath: ''
+                    reason: reason,
+                    imagePath: '',
+                    viewType: viewType || 'all'
                 });
             } else {
-                imagePaths.forEach(originalPath => {
+                imagePaths.forEach(({ path: originalPath, viewType: imgViewType }) => {
                     const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
                     if (normalizedPath) {
-                        pathsToCheck.set(normalizedPath, { productId: categorizedProductId, originalPath });
+                        pathsToCheck.set(normalizedPath, { 
+                            productId: categorizedProductId, 
+                            originalPath, 
+                            viewType: imgViewType 
+                        });
                     }
                 });
             }
@@ -448,13 +484,14 @@ ipcMain.handle('analyze', async (event, options) => {
             sendProgress({ type: 'log', message: `Checking ${pathsToCheck.size} image paths against WebDAV...` });
             let missingFileCount = 0;
             
-            for (const [normalizedPath, { productId, originalPath }] of pathsToCheck) {
+            for (const [normalizedPath, { productId, originalPath, viewType: imgViewType }] of pathsToCheck) {
                 if (!actualFiles.has(normalizedPath)) {
                     missingFileCount++;
                     missingProducts.push({
                         productId: productId,
                         reason: 'File not found on WebDAV',
-                        imagePath: originalPath
+                        imagePath: originalPath,
+                        viewType: imgViewType || viewType || 'all'
                     });
                 }
             }
@@ -467,11 +504,13 @@ ipcMain.handle('analyze', async (event, options) => {
         const emptyGroupCount = missingProducts.filter(p => p.reason.includes('exists but is empty')).length;
         const missingWebDAVCount = missingProducts.filter(p => p.reason === 'File not found on WebDAV').length;
         
+        const viewTypeSummary = checkAllViewTypes ? 'all view types' : `view-type '${viewType}'`;
+        
         sendProgress({ type: 'log', message: '========================================' });
         sendProgress({ type: 'log', message: 'Analysis Complete!' });
-        sendProgress({ type: 'log', message: `Summary:` });
-        sendProgress({ type: 'log', message: `  - ${missingGroupCount} products missing image-group for view-type '${viewType}'` });
-        sendProgress({ type: 'log', message: `  - ${emptyGroupCount} products with empty image-group` });
+        sendProgress({ type: 'log', message: `Summary (checking ${viewTypeSummary}):` });
+        sendProgress({ type: 'log', message: `  - ${missingGroupCount} products missing image groups` });
+        sendProgress({ type: 'log', message: `  - ${emptyGroupCount} products with empty image groups` });
         sendProgress({ type: 'log', message: `  - ${missingWebDAVCount} products with image paths not found on WebDAV` });
         sendProgress({ type: 'log', message: `  - Total: ${missingProducts.length} issues` });
         
@@ -504,7 +543,9 @@ ipcMain.handle('save-csv', async (event, csvData, viewType) => {
                     String(today.getDate()).padStart(2, '0');
     
     // Sanitize view type for filename (remove special characters)
-    const sanitizedViewType = viewType.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const sanitizedViewType = viewType && viewType.trim() 
+        ? viewType.replace(/[^a-zA-Z0-9-_]/g, '_')
+        : 'all-view-types';
     const defaultFilename = `${sanitizedViewType}_missing-image-report_${dateStr}.csv`;
     
     const result = await dialog.showSaveDialog(mainWindow, {

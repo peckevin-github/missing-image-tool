@@ -20,12 +20,24 @@ The tool identifies two types of image issues:
 
 ## Installation
 
-### Prerequisites
+### Quick Install (Recommended)
 
+**Pre-built installers are available in the `Install/` folder:**
+
+- **macOS**: `Missing Image Tool-1.0.0.dmg`
+- **Windows**: `Missing Image Tool Setup 1.0.0.exe`
+
+Just double-click the appropriate installer for your platform and follow the prompts. See `Install/README.md` for detailed installation instructions.
+
+### Development Setup
+
+If you want to run from source or make modifications:
+
+**Prerequisites:**
 - Node.js (version 16 or higher)
 - npm (comes with Node.js)
 
-### Setup
+**Setup:**
 
 1. **Clone or download this repository**
 
@@ -107,6 +119,12 @@ Creates an installer in the `dist` folder
 npm run build-linux
 ```
 Creates an AppImage in the `dist` folder
+
+### All Platforms
+```bash
+npm run build
+```
+Builds for all platforms. The final installers can be found in both the `dist/` folder (along with build artifacts) and copied to the `Install/` folder for easy access.
 
 ## CSV Output Format
 

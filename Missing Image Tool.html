@@ -46,12 +46,12 @@
                         <div>
                             <h3 class="text-md font-semibold mb-2">How It Works</h3>
                             <p class="text-sm">
-                                This tool identifies two types of image issues for products assigned to categories in your storefront catalog:
+                                This tool analyzes <strong>online products</strong> (where online-flag="true") that are assigned to categories in your storefront catalog. It identifies two types of image issues:
                                 <ol class="list-decimal list-inside pl-4 mt-2 text-xs">
                                     <li><strong>Missing Image Group:</strong> Products that do not have an <strong>&lt;image-group&gt;</strong> with a `view-type` matching the View Type you provide.</li>
                                     <li><strong>Missing Image File:</strong> Products that have the correct image group, but the image file specified in the <strong>&lt;image path="..."/&gt;</strong> tag is not found on the WebDAV server.</li>
                                 </ol>
-                                It recursively scans your entire WebDAV folder to find all available image files for the comparison.
+                                Offline products are automatically ignored. The tool recursively scans your entire WebDAV folder to find all available image files for the comparison.
                             </p>
                         </div>
                         <div>
@@ -68,7 +68,7 @@
                                 <li>
                                     <strong>Configure Instance & Paths:</strong> Fill in all the details for your B2C Commerce instance in Section 2.
                                     <ul class="list-disc list-inside ml-4 mt-2 space-y-1 text-xs text-gray-600">
-                                        <li><strong>View Type:</strong> The view type you're checking. This will be matched against the `view-type` attribute in the catalog's `image-group` tag.</li>
+                                        <li><strong>View Type (optional):</strong> Leave empty to check all image view types, or specify a view type (e.g., "large", "small") to check only that type.</li>
                                         <li><strong>WebDAV Folder URL:</strong> The full URL to the root folder for your images. (e.g., `https://.../images/`). Must end with a `/`.</li>
                                         <li><strong>Username:</strong> Your Account Manager email address.</li>
                                         <li><strong>Password:</strong> Your WebDAV File Access / UX Studio access key from Business Manager.</li>
@@ -106,8 +106,9 @@
                 <h2 class="text-xl font-semibold mb-4 pb-2 border-b">2. Configure Instance & Paths</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label for="view-type" class="block text-sm font-medium text-gray-700">View Type</label>
-                        <input type="text" id="view-type" placeholder="e.g., large, small, swatch" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <label for="view-type" class="block text-sm font-medium text-gray-700">View Type <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="view-type" placeholder="e.g., large, small, swatch (leave empty for all types)" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">Leave empty to check all image view types, or specify one to check only that type.</p>
                     </div>
                     <div class="md:col-span-2">
                          <label for="webdav-url" class="block text-sm font-medium text-gray-700">WebDAV Folder URL</label>
@@ -275,8 +276,8 @@
             const viewType = viewTypeInput.value.trim();
             const webdavUrl = webdavUrlInput.value.trim();
 
-            if (!productCatalogInput.files[0] || !storefrontCatalogInput.files[0] || !webdavUrl || !usernameInput.value || !viewType) {
-                log('Error: Please fill in all fields and select both catalog files.');
+            if (!productCatalogInput.files[0] || !storefrontCatalogInput.files[0] || !webdavUrl || !usernameInput.value) {
+                log('Error: Please select both catalog files and fill in WebDAV URL and username.');
                 resetUI();
                 return;
             }
@@ -358,7 +359,12 @@
                     resetUI();
                     return;
                 }
-                log(`    ✓ Master catalog parsed successfully (${productCatalogDoc.querySelectorAll('product').length} products found)`);
+                const allProducts = productCatalogDoc.querySelectorAll('product');
+                const onlineProducts = productCatalogDoc.querySelectorAll('product[online-flag="true"]');
+                const offlineProducts = allProducts.length - onlineProducts.length;
+                log(`    ✓ Master catalog parsed successfully (${allProducts.length} products found)`);
+                log(`      └─ ${onlineProducts.length} online products (will be analyzed)`);
+                log(`      └─ ${offlineProducts} offline products (will be ignored)`);
                 
                 // Parse storefront catalog
                 log('--> Parsing storefront catalog XML...');
@@ -377,10 +383,10 @@
                 }
                 log(`    ✓ Storefront catalog parsed successfully (${storefrontCatalogDoc.querySelectorAll('category-assignment').length} category assignments found)`);
 
-                // 3. Build variant-to-master map
-                log('Building variant-to-master map...');
+                // 3. Build variant-to-master map (only for online products)
+                log('Building variant-to-master map for online products...');
                 const variantToMasterMap = new Map();
-                productCatalogDoc.querySelectorAll('product > variations > variants > variant').forEach(variant => {
+                productCatalogDoc.querySelectorAll('product[online-flag="true"] > variations > variants > variant').forEach(variant => {
                     const master = variant.closest('product');
                     if (master) {
                         const variantId = variant.getAttribute('product-id');
@@ -388,7 +394,7 @@
                         variantToMasterMap.set(variantId, masterId);
                     }
                 });
-                log(`--> Mapped ${variantToMasterMap.size} variants to their master products.`);
+                log(`--> Mapped ${variantToMasterMap.size} variants to their online master products.`);
 
                 // 4. Get categorized products from storefront catalog
                 log(`Finding all categorized products from storefront catalog...`);
@@ -396,8 +402,10 @@
                 log(`--> Found ${categorizedProducts.size} unique products assigned to categories.`);
                 
                 // 5. Check each categorized product for image groups and paths
-                log(`Analyzing products for missing image groups (view-type='${viewType}')...`);
-                const pathsToCheck = new Map(); // Map<normalizedPath, {productId, originalPath}>
+                const checkAllViewTypes = !viewType || viewType.trim() === '';
+                const viewTypeMessage = checkAllViewTypes ? 'all view types' : `view-type='${viewType}'`;
+                log(`Analyzing products for missing image groups (${viewTypeMessage})...`);
+                const pathsToCheck = new Map(); // Map<normalizedPath, {productId, originalPath, viewType}>
                 let variantsMappedCount = 0;
                 let productsNotFoundCount = 0;
 
@@ -418,36 +426,65 @@
                         return;
                     }
                     
-                    const viewTypeSelector = `images > image-group[view-type="${viewType}"]`;
+                    // Check if product is online - skip offline products
+                    const onlineFlag = productEl.getAttribute('online-flag');
+                    if (onlineFlag !== 'true') {
+                        productsNotFoundCount++;
+                        return;
+                    }
+                    
+                    // Get all image groups or specific view type
+                    const imageGroups = checkAllViewTypes 
+                        ? productEl.querySelectorAll('images > image-group')
+                        : productEl.querySelectorAll(`images > image-group[view-type="${viewType}"]`);
 
                     // The image group will always be on the master/standalone product element
-                    const imageGroup = productEl.querySelector(viewTypeSelector);
-                    
-                    if (!imageGroup) {
-                        // Condition A: Missing the entire image group for this view-type
+                    if (imageGroups.length === 0) {
+                        // Condition A: Missing the entire image group(s)
+                        const reason = checkAllViewTypes 
+                            ? 'Missing image groups (no image groups found)'
+                            : `Missing image group for view-type '${viewType}'`;
                         finalMissingProducts.push({
                             productId: categorizedProductId, // Report the original ID from the category assignment
-                            reason: `Missing image group for view-type '${viewType}'`,
-                            imagePath: ''
+                            reason: reason,
+                            imagePath: '',
+                            viewType: viewType || 'all'
                         });
                     } else {
-                        // Condition B: Group exists, so check the paths within it
-                        const imagePathsInGroup = imageGroup.querySelectorAll('image[path]');
-                        if (imagePathsInGroup.length === 0) {
-                             finalMissingProducts.push({
+                        // Condition B: Group(s) exist, so check the paths within them
+                        let hasAnyImages = false;
+                        
+                        imageGroups.forEach(imageGroup => {
+                            const groupViewType = imageGroup.getAttribute('view-type');
+                            const imagePathsInGroup = imageGroup.querySelectorAll('image[path]');
+                            
+                            if (imagePathsInGroup.length > 0) {
+                                hasAnyImages = true;
+                                imagePathsInGroup.forEach(imageEl => {
+                                    const originalPath = imageEl.getAttribute('path');
+                                    // Normalize: replace backslashes, lowercase, remove leading/trailing slashes and spaces
+                                    const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
+                                    // Report the original ID in the map for checking
+                                    if (normalizedPath) {
+                                        pathsToCheck.set(normalizedPath, { 
+                                            productId: categorizedProductId, 
+                                            originalPath,
+                                            viewType: groupViewType 
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                        
+                        if (!hasAnyImages) {
+                            const reason = checkAllViewTypes 
+                                ? 'Image groups exist but are empty'
+                                : `Image group for view-type '${viewType}' exists but is empty`;
+                            finalMissingProducts.push({
                                 productId: categorizedProductId,
-                                reason: `Image group for view-type '${viewType}' exists but is empty`,
-                                imagePath: ''
-                            });
-                        } else {
-                            imagePathsInGroup.forEach(imageEl => {
-                                const originalPath = imageEl.getAttribute('path');
-                                // Normalize: replace backslashes, lowercase, remove leading/trailing slashes and spaces
-                                const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
-                                // Report the original ID in the map for checking
-                                if (normalizedPath) {
-                                    pathsToCheck.set(normalizedPath, { productId: categorizedProductId, originalPath });
-                                }
+                                reason: reason,
+                                imagePath: '',
+                                viewType: viewType || 'all'
                             });
                         }
                     }
@@ -494,13 +531,14 @@
 
                         log(`Checking ${pathsToCheck.size} image paths against WebDAV files...`);
                         let missingFileCount = 0;
-                        pathsToCheck.forEach(({ productId, originalPath }, normalizedPath) => {
+                        pathsToCheck.forEach(({ productId, originalPath, viewType: imgViewType }, normalizedPath) => {
                             if (!actualFiles.has(normalizedPath)) {
                                 missingFileCount++;
                                 finalMissingProducts.push({
                                     productId: productId, // Use the original ID from the map
                                     reason: 'File not found on WebDAV',
-                                    imagePath: originalPath
+                                    imagePath: originalPath,
+                                    viewType: imgViewType || viewType || 'all'
                                 });
                             }
                         });
@@ -525,9 +563,10 @@
                 const emptyGroupCount = finalMissingProducts.filter(p => p.reason.includes('exists but is empty')).length;
                 const missingWebDAVCount = finalMissingProducts.filter(p => p.reason === 'File not found on WebDAV').length;
                 
-                log(`Summary:`);
-                log(`  - ${missingGroupCount} products missing image-group for view-type '${viewType}'`);
-                log(`  - ${emptyGroupCount} products with empty image-group`);
+                const viewTypeSummary = checkAllViewTypes ? 'all view types' : `view-type '${viewType}'`;
+                log(`Summary (checking ${viewTypeSummary}):`);
+                log(`  - ${missingGroupCount} products missing image groups`);
+                log(`  - ${emptyGroupCount} products with empty image groups`);
                 log(`  - ${missingWebDAVCount} products with image paths not found on WebDAV`);
                 log(`  - Total: ${finalMissingProducts.length} issues`);
                 
