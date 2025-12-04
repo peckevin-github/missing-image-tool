@@ -80,13 +80,12 @@ async function parseXMLCatalog(filePath, sendProgress) {
         const products = new Map();
         const variantMap = new Map();
         let productCount = 0;
-        let onlineProductCount = 0;
-        let offlineProductCount = 0;
         
         // Current product being parsed
         let currentProduct = null;
         let currentPath = [];
         let currentText = '';
+        let currentSiteOnlineFlag = null;
         
         try {
             // SAX streaming parser
@@ -102,11 +101,22 @@ async function parseXMLCatalog(filePath, sendProgress) {
                 currentProduct = {
                     productId: node.attributes['product-id'],
                     onlineFlag: node.attributes['online-flag'],
+                    siteOnlineFlags: new Map(),
                     images: null,
                     variations: null,
                     imageGroups: [],
                     variants: []
                 };
+            }
+            
+            // Site-specific online-flag element (child of product)
+            if (node.name === 'online-flag' && currentProduct && currentPath[currentPath.length - 2] === 'product') {
+                const nodeSiteId = node.attributes['site-id'] || node.attributes['xml:lang'];
+                if (nodeSiteId) {
+                    currentSiteOnlineFlag = { siteId: nodeSiteId };
+                } else {
+                    currentSiteOnlineFlag = null;
+                }
             }
             
             // Image group
@@ -131,11 +141,40 @@ async function parseXMLCatalog(filePath, sendProgress) {
                 const variantId = node.attributes['product-id'];
                 if (variantId) {
                     currentProduct.variants.push(variantId);
+                    
+                    // Debug specific products
+                    if (variantId === 'DB01-1000' || variantId === '1OA-PM-1021' || productCount <= 5) {
+                        sendProgress({ 
+                            type: 'log', 
+                            message: `Debug - Found variant ${variantId} under master ${currentProduct.productId}` 
+                        });
+                    }
+                }
+            }
+        });
+        
+        saxStream.on('text', (text) => {
+            // Capture online-flag text content
+            if (currentPath[currentPath.length - 1] === 'online-flag' && currentProduct) {
+                const trimmedText = text.trim();
+                if (trimmedText && currentSiteOnlineFlag) {
+                    // This is a site-specific online-flag value
+                    currentProduct.siteOnlineFlags.set(currentSiteOnlineFlag.siteId, trimmedText);
+                } else if (trimmedText && !currentSiteOnlineFlag) {
+                    // This is the global online-flag element value
+                    if (!currentProduct.onlineFlag) {
+                        currentProduct.onlineFlag = trimmedText;
+                    }
                 }
             }
         });
         
         saxStream.on('closetag', (tagName) => {
+            // Reset site-specific online-flag tracker
+            if (tagName === 'online-flag') {
+                currentSiteOnlineFlag = null;
+            }
+            
             // End of product element
             if (tagName === 'product' && currentProduct && currentPath.length === 2) {
                 productCount++;
@@ -145,32 +184,25 @@ async function parseXMLCatalog(filePath, sendProgress) {
                 }
                 
                 if (currentProduct.productId) {
-                    // Check if product is online (online-flag="true")
-                    const isOnline = currentProduct.onlineFlag === 'true';
-                    
-                    if (isOnline) {
-                        onlineProductCount++;
-                        
-                        // Convert imageGroups array to structured format
-                        if (currentProduct.imageGroups && currentProduct.imageGroups.length > 0) {
-                            currentProduct.images = { 'image-group': currentProduct.imageGroups };
-                        }
-                        delete currentProduct.imageGroups;
-                        
-                        // Map variants (only for online products)
-                        if (currentProduct.variants && currentProduct.variants.length > 0) {
-                            currentProduct.variants.forEach(variantId => {
-                                variantMap.set(variantId, currentProduct.productId);
-                            });
-                            currentProduct.variations = { hasVariants: true };
-                        }
-                        delete currentProduct.variants;
-                        delete currentProduct.onlineFlag;
-                        
-                        products.set(currentProduct.productId, currentProduct);
-                    } else {
-                        offlineProductCount++;
+                    // Convert imageGroups array to structured format
+                    if (currentProduct.imageGroups && currentProduct.imageGroups.length > 0) {
+                        currentProduct.images = { 'image-group': currentProduct.imageGroups };
                     }
+                    delete currentProduct.imageGroups;
+                    
+                    // Map variants
+                    if (currentProduct.variants && currentProduct.variants.length > 0) {
+                        currentProduct.variants.forEach(variantId => {
+                            variantMap.set(variantId, currentProduct.productId);
+                        });
+                        currentProduct.variations = { hasVariants: true };
+                    }
+                    delete currentProduct.variants;
+                    
+                    // Keep online flag data for later filtering
+                    // Don't delete onlineFlag or siteOnlineFlags - we'll use them during analysis
+                    
+                    products.set(currentProduct.productId, currentProduct);
                 }
                 
                 currentProduct = null;
@@ -181,8 +213,8 @@ async function parseXMLCatalog(filePath, sendProgress) {
         });
         
             saxStream.on('end', () => {
-                sendProgress({ type: 'parsing', message: `Parsed ${productCount} products (${onlineProductCount} online, ${offlineProductCount} offline)` });
-                resolve({ products, variantMap, productCount, onlineProductCount, offlineProductCount });
+                sendProgress({ type: 'parsing', message: `Parsed ${productCount} products from master catalog` });
+                resolve({ products, variantMap, productCount });
             });
             
             saxStream.on('error', (error) => {
@@ -334,7 +366,7 @@ async function getWebDAVFiles(hostname, remotePath, username, password, basePath
 
 // Main analysis handler
 ipcMain.handle('analyze', async (event, options) => {
-    const { masterCatalogPath, storefrontCatalogPath, viewType, webdavUrl, username, password } = options;
+    const { masterCatalogPath, storefrontCatalogPath, viewType, siteId, webdavUrl, username, password } = options;
     
     const sendProgress = (data) => {
         event.sender.send('analysis-progress', data);
@@ -346,48 +378,136 @@ ipcMain.handle('analyze', async (event, options) => {
         const hostname = url.origin;
         const remoteLibraryPath = url.pathname;
         
-        // 1. Parse master catalog
-        sendProgress({ type: 'log', message: 'Parsing master catalog...' });
-        const { products, variantMap, productCount, onlineProductCount, offlineProductCount } = await parseXMLCatalog(masterCatalogPath, sendProgress);
+        // 1. Parse storefront catalog first (smaller file, faster)
+        sendProgress({ type: 'log', message: 'Step 1: Parsing storefront catalog for categorized products...' });
+        const { categoryAssignments } = await parseStorefrontCatalog(storefrontCatalogPath, sendProgress);
+        sendProgress({ type: 'log', message: `✓ Found ${categoryAssignments.size} categorized products` });
+        
+        // 2. Parse master catalog (all products - needed for variant mapping and images)
+        sendProgress({ type: 'log', message: 'Step 2: Parsing master catalog for product images and variants...' });
+        const { products, variantMap, productCount } = await parseXMLCatalog(masterCatalogPath, sendProgress);
         sendProgress({ type: 'log', message: `✓ Parsed ${productCount} products from master catalog` });
-        sendProgress({ type: 'log', message: `  └─ ${onlineProductCount} online products (analyzed)` });
-        sendProgress({ type: 'log', message: `  └─ ${offlineProductCount} offline products (ignored)` });
         sendProgress({ type: 'log', message: `✓ Mapped ${variantMap.size} variants to master products` });
         
-        // 2. Parse storefront catalog
-        sendProgress({ type: 'log', message: 'Parsing storefront catalog...' });
-        const { categoryAssignments } = await parseStorefrontCatalog(storefrontCatalogPath, sendProgress);
-        sendProgress({ type: 'log', message: `✓ Found ${categoryAssignments.size} category assignments` });
-        
-        // 3. Analyze products for missing images
+        // 3. Analyze categorized products for missing images (filter by online flag)
         const viewTypeMessage = viewType ? `view-type='${viewType}'` : 'all view types';
-        sendProgress({ type: 'log', message: `Analyzing products for missing image groups (${viewTypeMessage})...` });
+        const siteIdMessage = siteId ? ` for site '${siteId}'` : '';
+        sendProgress({ type: 'log', message: `Step 3: Analyzing categorized products${siteIdMessage} (${viewTypeMessage})...` });
+        sendProgress({ type: 'log', message: `  └─ Filtering to only online products` });
+        sendProgress({ type: 'log', message: `  └─ Looking up images from master catalog` });
         
         const missingProducts = [];
         const pathsToCheck = new Map();
         let variantsMappedCount = 0;
         let productsNotFoundCount = 0;
+        let offlineProductCount = 0;
         const checkAllViewTypes = !viewType || viewType.trim() === '';
+        let debugProductCount = 0;
         
         for (const categorizedProductId of categoryAssignments) {
             let productToAnalyzeId = categorizedProductId;
+            let isVariant = false;
+            
+            // Debug specific problem products
+            const isDebugProduct = categorizedProductId === 'DB01-1000' || categorizedProductId === '1OA-PM-1021';
             
             // Check if it's a variant
             if (variantMap.has(categorizedProductId)) {
                 productToAnalyzeId = variantMap.get(categorizedProductId);
+                isVariant = true;
                 variantsMappedCount++;
+                
+                if (isDebugProduct) {
+                    sendProgress({ 
+                        type: 'log', 
+                        message: `DEBUG - Product "${categorizedProductId}" IS IN VARIANT MAP -> mapped to master "${productToAnalyzeId}"` 
+                    });
+                }
+            } else if (isDebugProduct) {
+                sendProgress({ 
+                    type: 'log', 
+                    message: `DEBUG - Product "${categorizedProductId}" NOT IN VARIANT MAP - will treat as standalone/master` 
+                });
             }
             
             const product = products.get(productToAnalyzeId);
             
             if (!product) {
                 productsNotFoundCount++;
+                if (isDebugProduct) {
+                    sendProgress({ 
+                        type: 'log', 
+                        message: `DEBUG - Product/Master "${productToAnalyzeId}" NOT FOUND in parsed products (skipping)` 
+                    });
+                }
                 continue;
+            }
+            
+            // Check if product is online
+            let flagToCheck = null;
+            let flagSource = '';
+            
+            if (siteId && siteId.trim() !== '') {
+                // User specified a Site ID - use site-specific online-flag
+                if (product.siteOnlineFlags && product.siteOnlineFlags.has(siteId)) {
+                    flagToCheck = product.siteOnlineFlags.get(siteId);
+                    flagSource = `site-specific (${siteId})`;
+                } else {
+                    // Site ID specified but not found for this product - check global as fallback
+                    flagToCheck = product.onlineFlag;
+                    flagSource = `global (site '${siteId}' not found)`;
+                }
+            } else {
+                // No Site ID specified - use global online-flag attribute
+                flagToCheck = product.onlineFlag;
+                flagSource = 'global attribute';
+            }
+            
+            const onlineFlagValue = flagToCheck ? flagToCheck.toLowerCase() : null;
+            const isOnline = onlineFlagValue === 'true';
+            
+            if (!isOnline) {
+                offlineProductCount++;
+                if (isDebugProduct) {
+                    sendProgress({ 
+                        type: 'log', 
+                        message: `DEBUG - Product "${productToAnalyzeId}" is OFFLINE (${flagSource}="${flagToCheck}") - skipping` 
+                    });
+                }
+                continue;
+            }
+            
+            // Debug: Log first few variant products to show the mapping
+            if (isVariant && debugProductCount < 5) {
+                debugProductCount++;
+                sendProgress({ 
+                    type: 'log', 
+                    message: `Debug - Variant "${categorizedProductId}" mapped to master "${productToAnalyzeId}" (online)` 
+                });
             }
             
             // Check for image group(s)
             let hasImageGroup = false;
             let imagePaths = [];
+            
+            if (isDebugProduct) {
+                const hasImages = product.images && product.images['image-group'];
+                if (hasImages) {
+                    const imageGroups = Array.isArray(product.images['image-group']) 
+                        ? product.images['image-group'] 
+                        : [product.images['image-group']];
+                    const viewTypes = imageGroups.map(g => g['@_view-type'] || g.viewType).join(', ');
+                    sendProgress({ 
+                        type: 'log', 
+                        message: `DEBUG - Product "${productToAnalyzeId}" has image groups with view types: [${viewTypes}]` 
+                    });
+                } else {
+                    sendProgress({ 
+                        type: 'log', 
+                        message: `DEBUG - Product "${productToAnalyzeId}" has NO image groups at all!` 
+                    });
+                }
+            }
             
             if (product.images && product.images['image-group']) {
                 const imageGroups = Array.isArray(product.images['image-group']) 
@@ -448,10 +568,20 @@ ipcMain.handle('analyze', async (event, options) => {
                 imagePaths.forEach(({ path: originalPath, viewType: imgViewType }) => {
                     const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
                     if (normalizedPath) {
+                        // Debug: Log a few image path examples showing variant->master mapping
+                        if (isVariant && debugProductCount <= 5) {
+                            sendProgress({ 
+                                type: 'log', 
+                                message: `  └─ Found image: "${originalPath}" (from master "${productToAnalyzeId}")` 
+                            });
+                        }
+                        
                         pathsToCheck.set(normalizedPath, { 
-                            productId: categorizedProductId, 
+                            productId: categorizedProductId,
+                            masterProductId: productToAnalyzeId,
                             originalPath, 
-                            viewType: imgViewType 
+                            viewType: imgViewType,
+                            isVariant: isVariant
                         });
                     }
                 });
@@ -460,6 +590,9 @@ ipcMain.handle('analyze', async (event, options) => {
         
         if (variantsMappedCount > 0) {
             sendProgress({ type: 'log', message: `✓ Mapped ${variantsMappedCount} variant products to their masters` });
+        }
+        if (offlineProductCount > 0) {
+            sendProgress({ type: 'log', message: `✓ Skipped ${offlineProductCount} offline products` });
         }
         if (productsNotFoundCount > 0) {
             sendProgress({ type: 'log', message: `⚠️  ${productsNotFoundCount} products not found in master catalog (skipped)` });
@@ -483,12 +616,25 @@ ipcMain.handle('analyze', async (event, options) => {
             
             sendProgress({ type: 'log', message: `Checking ${pathsToCheck.size} image paths against WebDAV...` });
             let missingFileCount = 0;
+            let debugMissingCount = 0;
             
-            for (const [normalizedPath, { productId, originalPath, viewType: imgViewType }] of pathsToCheck) {
+            for (const [normalizedPath, { productId, masterProductId, originalPath, viewType: imgViewType, isVariant }] of pathsToCheck) {
                 if (!actualFiles.has(normalizedPath)) {
                     missingFileCount++;
+                    
+                    // Debug: Show first few missing files with variant info
+                    if (debugMissingCount < 5) {
+                        debugMissingCount++;
+                        const variantInfo = isVariant ? ` (variant of ${masterProductId})` : '';
+                        sendProgress({ 
+                            type: 'log', 
+                            message: `Debug - Missing: "${originalPath}" for product ${productId}${variantInfo}` 
+                        });
+                    }
+                    
                     missingProducts.push({
                         productId: productId,
+                        masterProductId: isVariant ? masterProductId : '',
                         reason: 'File not found on WebDAV',
                         imagePath: originalPath,
                         viewType: imgViewType || viewType || 'all'
@@ -536,17 +682,20 @@ ipcMain.handle('analyze', async (event, options) => {
 
 // Handle CSV download
 ipcMain.handle('save-csv', async (event, csvData, viewType) => {
-    // Generate filename with view type and current date
-    const today = new Date();
-    const dateStr = today.getFullYear() + '-' + 
-                    String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-                    String(today.getDate()).padStart(2, '0');
+    // Generate filename with view type, current date, and timestamp
+    const now = new Date();
+    const dateStr = now.getFullYear() + '-' + 
+                    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                    String(now.getDate()).padStart(2, '0');
+    const timeStr = String(now.getHours()).padStart(2, '0') + '-' +
+                    String(now.getMinutes()).padStart(2, '0') + '-' +
+                    String(now.getSeconds()).padStart(2, '0');
     
     // Sanitize view type for filename (remove special characters)
     const sanitizedViewType = viewType && viewType.trim() 
         ? viewType.replace(/[^a-zA-Z0-9-_]/g, '_')
         : 'all-view-types';
-    const defaultFilename = `${sanitizedViewType}_missing-image-report_${dateStr}.csv`;
+    const defaultFilename = `${sanitizedViewType}_missing-image-report_${dateStr}_${timeStr}.csv`;
     
     const result = await dialog.showSaveDialog(mainWindow, {
         title: 'Save Missing Images Report',

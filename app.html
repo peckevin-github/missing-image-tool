@@ -45,12 +45,19 @@
                         <div>
                             <h3 class="text-md font-semibold mb-2">How It Works</h3>
                             <p class="text-sm">
-                                This tool analyzes <strong>online products</strong> (where online-flag="true") that are assigned to categories in your storefront catalog. It identifies two types of image issues:
-                                <ol class="list-decimal list-inside pl-4 mt-2 text-xs">
-                                    <li><strong>Missing Image Group:</strong> Products that do not have an <strong>&lt;image-group&gt;</strong> with a `view-type` matching the View Type you provide.</li>
-                                    <li><strong>Missing Image File:</strong> Products that have the correct image group, but the image file specified in the <strong>&lt;image path="..."/&gt;</strong> tag is not found on the WebDAV server.</li>
+                                This tool uses a 3-step process to find missing images:
+                                <ol class="list-decimal list-inside pl-4 mt-2 text-xs space-y-1">
+                                    <li><strong>Get categorized products</strong> from your storefront catalog (smaller file, parsed first)</li>
+                                    <li><strong>Filter to online products only</strong> using online-flag from master catalog (global or site-specific)</li>
+                                    <li><strong>Check images</strong> for products that are both categorized AND online</li>
                                 </ol>
-                                Offline products are automatically ignored. The tool recursively scans your entire WebDAV folder to find all available image files for the comparison.
+                            </p>
+                            <p class="text-sm mt-3">
+                                Two types of image issues are identified:
+                                <ul class="list-disc list-inside pl-4 mt-2 text-xs space-y-1">
+                                    <li><strong>Missing Image Group:</strong> Products without an <strong>&lt;image-group&gt;</strong> matching your view type</li>
+                                    <li><strong>Missing Image File:</strong> Products with image groups but files not found on WebDAV</li>
+                                </ul>
                             </p>
                         </div>
                         <div class="bg-blue-50 border border-blue-200 rounded p-3 mt-3">
@@ -60,6 +67,9 @@
                                 <li>• Streaming XML parser - efficient memory usage</li>
                                 <li>• Native file dialogs for better file selection</li>
                             </ul>
+                        </div>
+                        <div class="bg-amber-50 border border-amber-200 rounded p-3 mt-3">
+                            <p class="text-xs text-amber-800"><strong>💡 Site-Specific Online Flags:</strong> If your catalog uses site-specific online flags (different per site like PC, CI, CCOM), enter the Site ID. Otherwise, leave empty to use the global online-flag attribute.</p>
                         </div>
                     </div>
                 </details>
@@ -94,6 +104,11 @@
                         <label for="view-type" class="block text-sm font-medium text-gray-700">View Type <span class="text-gray-400 font-normal">(optional)</span></label>
                         <input type="text" id="view-type" placeholder="e.g., CI, large, small, swatch (leave empty for all types)" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                         <p class="mt-1 text-xs text-gray-500">Leave empty to check all image view types, or specify one to check only that type.</p>
+                    </div>
+                    <div>
+                        <label for="site-id" class="block text-sm font-medium text-gray-700">Site ID <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="site-id" placeholder="e.g., CCOM, CI, PC (leave empty for global online-flag)" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <p class="mt-1 text-xs text-gray-500">For site-specific online flags, specify the site ID to filter by that site's online status.</p>
                     </div>
                     <div class="md:col-span-2">
                         <label for="webdav-url" class="block text-sm font-medium text-gray-700">WebDAV Folder URL</label>
@@ -143,6 +158,7 @@
         const masterFileName = document.getElementById('master-file-name');
         const storefrontFileName = document.getElementById('storefront-file-name');
         const viewTypeInput = document.getElementById('view-type');
+        const siteIdInput = document.getElementById('site-id');
         const webdavUrlInput = document.getElementById('webdav-url');
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
@@ -202,6 +218,7 @@
             finalMissingProducts = [];
 
             const viewType = viewTypeInput.value.trim();
+            const siteId = siteIdInput.value.trim();
             const webdavUrl = webdavUrlInput.value.trim();
 
             if (!masterCatalogPath || !storefrontCatalogPath || !webdavUrl || !usernameInput.value) {
@@ -224,6 +241,7 @@
                 masterCatalogPath,
                 storefrontCatalogPath,
                 viewType,
+                siteId,
                 webdavUrl,
                 username: usernameInput.value,
                 password: passwordInput.value
@@ -256,12 +274,13 @@
                 return;
             }
             
-            const headers = ["product_id", "reason", "missing_image_path"];
+            const headers = ["product_id", "master_product_id", "reason", "missing_image_path"];
             let csvContent = headers.join(",") + "\n";
 
             finalMissingProducts.forEach(item => {
                 const row = [
                     `"${item.productId}"`,
+                    `"${item.masterProductId || ''}"`,
                     `"${item.reason}"`,
                     `"${item.imagePath}"`
                 ];
