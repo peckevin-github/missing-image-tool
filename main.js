@@ -141,14 +141,6 @@ async function parseXMLCatalog(filePath, sendProgress) {
                 const variantId = node.attributes['product-id'];
                 if (variantId) {
                     currentProduct.variants.push(variantId);
-                    
-                    // Debug specific products
-                    if (variantId === 'DB01-1000' || variantId === '1OA-PM-1021' || productCount <= 5) {
-                        sendProgress({ 
-                            type: 'log', 
-                            message: `Debug - Found variant ${variantId} under master ${currentProduct.productId}` 
-                        });
-                    }
                 }
             }
         });
@@ -401,45 +393,25 @@ ipcMain.handle('analyze', async (event, options) => {
         let variantsMappedCount = 0;
         let productsNotFoundCount = 0;
         let offlineProductCount = 0;
+        let onlineProductCount = 0;
         const checkAllViewTypes = !viewType || viewType.trim() === '';
-        let debugProductCount = 0;
+        let debugCount = 0;
         
         for (const categorizedProductId of categoryAssignments) {
             let productToAnalyzeId = categorizedProductId;
             let isVariant = false;
-            
-            // Debug specific problem products
-            const isDebugProduct = categorizedProductId === 'DB01-1000' || categorizedProductId === '1OA-PM-1021';
             
             // Check if it's a variant
             if (variantMap.has(categorizedProductId)) {
                 productToAnalyzeId = variantMap.get(categorizedProductId);
                 isVariant = true;
                 variantsMappedCount++;
-                
-                if (isDebugProduct) {
-                    sendProgress({ 
-                        type: 'log', 
-                        message: `DEBUG - Product "${categorizedProductId}" IS IN VARIANT MAP -> mapped to master "${productToAnalyzeId}"` 
-                    });
-                }
-            } else if (isDebugProduct) {
-                sendProgress({ 
-                    type: 'log', 
-                    message: `DEBUG - Product "${categorizedProductId}" NOT IN VARIANT MAP - will treat as standalone/master` 
-                });
             }
             
             const product = products.get(productToAnalyzeId);
             
             if (!product) {
                 productsNotFoundCount++;
-                if (isDebugProduct) {
-                    sendProgress({ 
-                        type: 'log', 
-                        message: `DEBUG - Product/Master "${productToAnalyzeId}" NOT FOUND in parsed products (skipping)` 
-                    });
-                }
                 continue;
             }
             
@@ -468,46 +440,25 @@ ipcMain.handle('analyze', async (event, options) => {
             
             if (!isOnline) {
                 offlineProductCount++;
-                if (isDebugProduct) {
-                    sendProgress({ 
-                        type: 'log', 
-                        message: `DEBUG - Product "${productToAnalyzeId}" is OFFLINE (${flagSource}="${flagToCheck}") - skipping` 
-                    });
-                }
                 continue;
             }
             
-            // Debug: Log first few variant products to show the mapping
-            if (isVariant && debugProductCount < 5) {
-                debugProductCount++;
+            // Product is online - increment counter
+            onlineProductCount++;
+            
+            // Debug: Log first 5 online products
+            if (debugCount < 5) {
+                debugCount++;
+                const variantInfo = isVariant ? ` (variant of ${productToAnalyzeId})` : ' (standalone/master)';
                 sendProgress({ 
                     type: 'log', 
-                    message: `Debug - Variant "${categorizedProductId}" mapped to master "${productToAnalyzeId}" (online)` 
+                    message: `Debug - Product "${categorizedProductId}"${variantInfo} -> online (${flagSource})` 
                 });
             }
             
             // Check for image group(s)
             let hasImageGroup = false;
             let imagePaths = [];
-            
-            if (isDebugProduct) {
-                const hasImages = product.images && product.images['image-group'];
-                if (hasImages) {
-                    const imageGroups = Array.isArray(product.images['image-group']) 
-                        ? product.images['image-group'] 
-                        : [product.images['image-group']];
-                    const viewTypes = imageGroups.map(g => g['@_view-type'] || g.viewType).join(', ');
-                    sendProgress({ 
-                        type: 'log', 
-                        message: `DEBUG - Product "${productToAnalyzeId}" has image groups with view types: [${viewTypes}]` 
-                    });
-                } else {
-                    sendProgress({ 
-                        type: 'log', 
-                        message: `DEBUG - Product "${productToAnalyzeId}" has NO image groups at all!` 
-                    });
-                }
-            }
             
             if (product.images && product.images['image-group']) {
                 const imageGroups = Array.isArray(product.images['image-group']) 
@@ -568,14 +519,6 @@ ipcMain.handle('analyze', async (event, options) => {
                 imagePaths.forEach(({ path: originalPath, viewType: imgViewType }) => {
                     const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
                     if (normalizedPath) {
-                        // Debug: Log a few image path examples showing variant->master mapping
-                        if (isVariant && debugProductCount <= 5) {
-                            sendProgress({ 
-                                type: 'log', 
-                                message: `  └─ Found image: "${originalPath}" (from master "${productToAnalyzeId}")` 
-                            });
-                        }
-                        
                         pathsToCheck.set(normalizedPath, { 
                             productId: categorizedProductId,
                             masterProductId: productToAnalyzeId,
@@ -588,14 +531,15 @@ ipcMain.handle('analyze', async (event, options) => {
             }
         }
         
+        sendProgress({ type: 'log', message: `✓ Results: ${onlineProductCount} online & categorized products to analyze` });
         if (variantsMappedCount > 0) {
-            sendProgress({ type: 'log', message: `✓ Mapped ${variantsMappedCount} variant products to their masters` });
+            sendProgress({ type: 'log', message: `  └─ ${variantsMappedCount} variants mapped to masters` });
         }
         if (offlineProductCount > 0) {
-            sendProgress({ type: 'log', message: `✓ Skipped ${offlineProductCount} offline products` });
+            sendProgress({ type: 'log', message: `  └─ ${offlineProductCount} offline products (skipped)` });
         }
         if (productsNotFoundCount > 0) {
-            sendProgress({ type: 'log', message: `⚠️  ${productsNotFoundCount} products not found in master catalog (skipped)` });
+            sendProgress({ type: 'log', message: `  └─ ${productsNotFoundCount} not found in master catalog (skipped)` });
             
             const missingPercentage = (productsNotFoundCount / categoryAssignments.size) * 100;
             if (missingPercentage > 50) {
@@ -616,21 +560,10 @@ ipcMain.handle('analyze', async (event, options) => {
             
             sendProgress({ type: 'log', message: `Checking ${pathsToCheck.size} image paths against WebDAV...` });
             let missingFileCount = 0;
-            let debugMissingCount = 0;
             
             for (const [normalizedPath, { productId, masterProductId, originalPath, viewType: imgViewType, isVariant }] of pathsToCheck) {
                 if (!actualFiles.has(normalizedPath)) {
                     missingFileCount++;
-                    
-                    // Debug: Show first few missing files with variant info
-                    if (debugMissingCount < 5) {
-                        debugMissingCount++;
-                        const variantInfo = isVariant ? ` (variant of ${masterProductId})` : '';
-                        sendProgress({ 
-                            type: 'log', 
-                            message: `Debug - Missing: "${originalPath}" for product ${productId}${variantInfo}` 
-                        });
-                    }
                     
                     missingProducts.push({
                         productId: productId,
