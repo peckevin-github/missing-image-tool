@@ -169,18 +169,6 @@ If you see a high percentage of products not found:
 - `preload.js` - Secure bridge between main and renderer processes
 - `app.html` - User interface
 - `package.json` - Dependencies and build configuration
-- `Missing Image Tool.html` - Original browser-based version (kept for reference)
-
-## Differences from Browser Version
-
-| Feature | Browser Version | Desktop Version |
-|---------|----------------|-----------------|
-| File Size Limit | ~100 MB | Unlimited |
-| XML Parsing | In-memory | Efficient parsing |
-| Performance | Slower with large files | Much faster |
-| File Selection | HTML input | Native dialog |
-| Installation | None (open HTML) | npm install required |
-| Dependencies | None (CDN) | Pure JavaScript (no compilation) |
 
 ## Support
 

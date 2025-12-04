@@ -35,12 +35,12 @@ The desktop app will open!
 4. **Wait for analysis to complete** (large files may take 5-10 minutes)
 5. **Download the CSV** when complete
 
-## What Changed from Browser Version?
+## Key Features
 
-✅ **Your 762 MB catalog now works!**
-- The browser version had a ~100 MB limit
-- The desktop version has no file size limits
-- Uses efficient streaming to handle any size file
+✅ **No file size limits** - Handle catalogs of any size (even 700+ MB files!)
+✅ **Fast streaming parser** - Efficient memory usage
+✅ **WebDAV verification** - Checks if image files actually exist
+✅ **CSV export** - Easy-to-use reports
 
 ## Troubleshooting
 
