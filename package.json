@@ -24,6 +24,12 @@
   "build": {
     "appId": "com.missing-image-tool",
     "productName": "Missing Image Tool",
+    "files": [
+      "main.js",
+      "preload.js",
+      "app.html",
+      "node_modules/**/*"
+    ],
     "directories": {
       "output": "dist"
     },
