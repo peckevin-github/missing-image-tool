@@ -517,7 +517,13 @@ ipcMain.handle('analyze', async (event, options) => {
                 });
             } else {
                 imagePaths.forEach(({ path: originalPath, viewType: imgViewType }) => {
-                    const normalizedPath = originalPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
+                    let decodedPath;
+                    try {
+                        decodedPath = decodeURIComponent(originalPath);
+                    } catch (e) {
+                        decodedPath = originalPath;
+                    }
+                    const normalizedPath = decodedPath.replace(/\\/g, '/').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
                     if (normalizedPath) {
                         pathsToCheck.set(normalizedPath, { 
                             productId: categorizedProductId,
